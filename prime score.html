@@ -2,78 +2,105 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>质数猎人 · 安全性能挑战</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>质数猎人 · iPhone版</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
             padding: 20px;
             background: #111;
             color: #eee;
             text-align: center;
             margin: 0;
+            touch-action: manipulation; /* 优化点击响应 */
         }
         h1 {
             color: #5ff;
-            margin-bottom: 10px;
+            margin: 15px 0;
+            font-size: 1.8rem;
+        }
+        .subtitle {
+            font-size: 1rem;
+            margin-bottom: 25px;
+            color: #aaa;
         }
         .controls {
-            margin: 20px 0;
+            margin: 25px 0;
         }
         button {
-            padding: 10px 20px;
-            margin: 0 5px;
-            font-size: 16px;
+            padding: 15px 30px;
+            margin: 0 8px;
+            font-size: 18px;
             border: none;
-            border-radius: 5px;
+            border-radius: 12px;
             cursor: pointer;
             background: #058;
             color: white;
+            -webkit-tap-highlight-color: transparent; /* 去除点击高亮 */
+            touch-action: manipulation;
+            min-width: 120px;
         }
-        button:hover {
+        button:hover, button:active {
             background: #07a;
+            transform: scale(0.98);
         }
         button:disabled {
             background: #333;
+            color: #777;
             cursor: not-allowed;
+            transform: none;
         }
         .stat-box {
             background: #222;
-            padding: 15px;
-            margin: 10px auto;
-            border-radius: 8px;
-            max-width: 400px;
+            padding: 20px;
+            margin: 20px auto;
+            border-radius: 15px;
+            max-width: 90%;
             text-align: left;
+            font-size: 18px;
+            line-height: 1.6;
         }
         .alert {
             background: #422;
             color: #fcc;
-            padding: 10px;
-            border-radius: 5px;
-            margin: 15px auto;
-            max-width: 400px;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px auto;
+            max-width: 90%;
             display: none;
+            font-size: 16px;
         }
         #share-section {
             margin-top: 30px;
-            padding: 20px;
+            padding: 25px;
             background: #223;
-            border-radius: 8px;
+            border-radius: 15px;
             display: none;
+            text-align: center;
         }
         #share-section button {
+            margin-top: 15px;
+            padding: 12px 25px;
+        }
+        /* 添加加载提示 */
+        #loading {
+            color: #aaa;
+            font-size: 14px;
             margin-top: 10px;
+            display: none;
         }
     </style>
 </head>
 <body>
     <h1>🔢 质数猎人</h1>
-    <p>安全可控的设备性能挑战 · 教育娱乐两不误</p>
+    <p class="subtitle">iPhone 专属优化版 · 安全不卡顿</p>
 
     <div class="controls">
-        <button id="start-btn">▶️ 开始挑战</button>
-        <button id="stop-btn" disabled>⏹️ 停止</button>
+        <button id="start-btn" ontouchstart="">▶️ 开始挑战</button>
+        <button id="stop-btn" disabled ontouchstart="">⏹️ 停止</button>
     </div>
+
+    <div id="loading">首次启动中，请稍候...</div>
 
     <div class="stat-box">
         <div>质数总数: <span id="prime-count">0</span></div>
@@ -83,125 +110,142 @@
     </div>
 
     <div id="protection-alert" class="alert">
-        ⚠️ 检测到设备负载过高，已自动暂停以保护系统。
+        ⚠️ 检测到设备负载过高，已自动暂停以保护电池和性能。
     </div>
 
     <div id="share-section">
         <h3>🏆 你的战绩：</h3>
         <div id="result-text">找到 0 个质数，用时 0 秒！</div>
-        <button id="again-btn">🔄 再来一次</button>
+        <button id="again-btn" ontouchstart="">🔄 再来一次</button>
     </div>
 
     <script>
-        let worker;
+        let isRunning = false;
+        let primeCount = 0;
+        let currentNum = 2;
         let startTime;
         let lastCount = 0;
         let timerInterval;
-        let isRunning = false;
+        let taskHandle;
         let heartbeatMissed = 0;
 
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         const protectionAlert = document.getElementById('protection-alert');
         const shareSection = document.getElementById('share-section');
+        const loading = document.getElementById('loading');
 
-        startBtn.addEventListener('click', startChallenge);
-        stopBtn.addEventListener('click', stopChallenge);
-        document.getElementById('again-btn').addEventListener('click', () => {
+        // 兼容 touch 和 click
+        function addSafeListener(element, handler) {
+            element.addEventListener('click', handler);
+            element.addEventListener('touchstart', handler, { passive: true });
+        }
+
+        addSafeListener(startBtn, startChallenge);
+        addSafeListener(stopBtn, stopChallenge);
+        addSafeListener(document.getElementById('again-btn'), () => {
             shareSection.style.display = 'none';
             startChallenge();
         });
 
+        function isPrime(num) {
+            if (num < 2) return false;
+            if (num === 2) return true;
+            if (num % 2 === 0) return false;
+            for (let i = 3; i <= Math.sqrt(num); i += 2) {
+                if (num % i === 0) return false;
+            }
+            return true;
+        }
+
         function startChallenge() {
             if (isRunning) return;
 
-            // 重置界面
-            protectionAlert.style.display = 'none';
-            shareSection.style.display = 'none';
-            document.getElementById('prime-count').innerText = '0';
-            document.getElementById('current-num').innerText = '2';
-            document.getElementById('speed').innerText = '-- primes/sec';
-            document.getElementById('timer').innerText = '0s';
+            // 首次启动提示
+            loading.style.display = 'block';
 
-            isRunning = true;
-            startTime = Date.now();
-            lastCount = 0;
-            heartbeatMissed = 0;
+            // 延迟启动，确保用户手势生效（iOS 安全策略）
+            setTimeout(() => {
+                loading.style.display = 'none';
 
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
+                // 重置数据
+                primeCount = 0;
+                currentNum = 2;
+                document.getElementById('prime-count').innerText = '0';
+                document.getElementById('current-num').innerText = '2';
+                document.getElementById('speed').innerText = '-- primes/sec';
+                document.getElementById('timer').innerText = '0s';
+                protectionAlert.style.display = 'none';
+                shareSection.style.display = 'none';
 
-            // 创建 Web Worker
-            const blob = new Blob([`
-                let count = 0;
-                let n = 2;
-
-                function isPrime(num) {
-                    if (num < 2) return false;
-                    if (num === 2) return true;
-                    if (num % 2 === 0) return false;
-                    for (let i = 3; i <= Math.sqrt(num); i += 2) {
-                        if (num % i === 0) return false;
-                    }
-                    return true;
-                }
-
-                setInterval(() => {
-                    let found = 0;
-                    const start = Date.now();
-                    while (Date.now() - start < 40) { // 控制每轮计算时间，避免卡死
-                        if (isPrime(n)) found++;
-                        n++;
-                    }
-                    count += found;
-                    postMessage({ count, current: n, found });
-                }, 50);
-            `], { type: 'application/javascript' });
-
-            worker = new Worker(URL.createObjectURL(blob));
-
-            worker.onmessage = function(e) {
-                const { count, current, found } = e.data;
-                const now = Date.now();
-                const elapsed = (now - startTime) / 1000;
-                const speed = Math.round(found / 0.05);
-
-                document.getElementById('prime-count').innerText = count.toLocaleString();
-                document.getElementById('current-num').innerText = current.toLocaleString();
-                document.getElementById('speed').innerText = speed.toLocaleString() + ' primes/sec';
-                document.getElementById('timer').innerText = Math.floor(elapsed) + 's';
-
-                // 心跳检测：如果主线程太久没响应，说明卡了
+                isRunning = true;
+                startTime = Date.now();
+                lastCount = 0;
                 heartbeatMissed = 0;
-                setTimeout(() => {
-                    heartbeatMissed++;
-                    if (heartbeatMissed > 2 && isRunning) {
-                        autoProtect();
-                    }
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+
+                // 使用 setTimeout 分片计算，兼容 iOS
+                nextChunk();
+
+                // 启动计时器
+                timerInterval = setInterval(() => {
+                    if (!isRunning) return;
+                    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                    document.getElementById('timer').innerText = elapsed + 's';
                 }, 1000);
-            };
 
-            worker.onerror = function(e) {
-                console.error("Worker error:", e);
-                autoProtect();
-            };
+                // 启动性能监控
+                setTimeout(checkPerformance, 5000);
+            }, 300);
+        }
 
-            // 启动计时器
-            timerInterval = setInterval(() => {
-                if (!isRunning) return;
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                document.getElementById('timer').innerText = elapsed + 's';
+        function nextChunk() {
+            if (!isRunning) return;
+
+            const start = Date.now();
+            let found = 0;
+
+            // 控制每轮最多计算 30ms，避免阻塞
+            while (Date.now() - start < 30) {
+                if (isPrime(currentNum)) {
+                    found++;
+                }
+                currentNum++;
+
+                // 防止数字过大
+                if (currentNum > 1e9) currentNum = 2;
+            }
+
+            primeCount += found;
+            const now = Date.now();
+            const elapsed = (now - startTime) / 1000;
+            const speed = Math.round(found / 0.03);
+
+            // 更新 UI
+            document.getElementById('prime-count').innerText = primeCount.toLocaleString();
+            document.getElementById('current-num').innerText = currentNum.toLocaleString();
+            document.getElementById('speed').innerText = speed.toLocaleString() + ' primes/sec';
+
+            // 心跳检测
+            heartbeatMissed = 0;
+            setTimeout(() => {
+                heartbeatMissed++;
+                if (heartbeatMissed > 2 && isRunning) {
+                    autoProtect();
+                }
             }, 1000);
 
-            // 启动过热保护检测
-            setTimeout(checkPerformance, 5000);
+            // 继续下一帧
+            taskHandle = setTimeout(nextChunk, 20);
         }
 
         function checkPerformance() {
             if (!isRunning) return;
             const speedText = document.getElementById('speed').innerText;
             const currentSpeed = parseInt(speedText) || 0;
-            if (currentSpeed < lastCount * 0.4 && lastCount > 500) {
+            if (currentSpeed < lastCount * 0.4 && lastCount > 300) {
                 autoProtect();
                 return;
             }
@@ -215,30 +259,31 @@
         }
 
         function stopChallenge() {
-            if (worker) {
-                worker.terminate();
-                worker = null;
+            isRunning = false;
+            if (taskHandle) {
+                clearTimeout(taskHandle);
+                taskHandle = null;
             }
             if (timerInterval) {
                 clearInterval(timerInterval);
                 timerInterval = null;
             }
-            isRunning = false;
             startBtn.disabled = false;
             stopBtn.disabled = true;
 
             // 显示结果
-            const count = parseInt(document.getElementById('prime-count').innerText.replace(/,/g, ''));
             const time = parseInt(document.getElementById('timer').innerText);
-            document.getElementById('result-text').innerText = `找到 ${count.toLocaleString()} 个质数，用时 ${time} 秒！`;
+            document.getElementById('result-text').innerText = `找到 ${primeCount.toLocaleString()} 个质数，用时 ${time} 秒！`;
             shareSection.style.display = 'block';
         }
 
-        // 页面隐藏时自动降低负载（节能+安全）
+        // 页面进入后台时自动暂停（省电+安全）
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && isRunning) {
-                // 可选：暂停或降低强度
-                console.log("页面切到后台，降低负载中...");
+                console.log("App 进入后台，自动暂停计算以节省电量");
+                stopChallenge();
+                protectionAlert.innerText = "📱 检测到进入后台，已自动暂停";
+                protectionAlert.style.display = 'block';
             }
         });
     </script>
