@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>质数猎人 · 安全性能挑战</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #111;
+            color: #eee;
+            text-align: center;
+            margin: 0;
+        }
+        h1 {
+            color: #5ff;
+            margin-bottom: 10px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #058;
+            color: white;
+        }
+        button:hover {
+            background: #07a;
+        }
+        button:disabled {
+            background: #333;
+            cursor: not-allowed;
+        }
+        .stat-box {
+            background: #222;
+            padding: 15px;
+            margin: 10px auto;
+            border-radius: 8px;
+            max-width: 400px;
+            text-align: left;
+        }
+        .alert {
+            background: #422;
+            color: #fcc;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 15px auto;
+            max-width: 400px;
+            display: none;
+        }
+        #share-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #223;
+            border-radius: 8px;
+            display: none;
+        }
+        #share-section button {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔢 质数猎人</h1>
+    <p>安全可控的设备性能挑战 · 教育娱乐两不误</p>
+
+    <div class="controls">
+        <button id="start-btn">▶️ 开始挑战</button>
+        <button id="stop-btn" disabled>⏹️ 停止</button>
+    </div>
+
+    <div class="stat-box">
+        <div>质数总数: <span id="prime-count">0</span></div>
+        <div>当前数字: <span id="current-num">2</span></div>
+        <div>速度: <span id="speed">-- primes/sec</span></div>
+        <div>运行时间: <span id="timer">0s</span></div>
+    </div>
+
+    <div id="protection-alert" class="alert">
+        ⚠️ 检测到设备负载过高，已自动暂停以保护系统。
+    </div>
+
+    <div id="share-section">
+        <h3>🏆 你的战绩：</h3>
+        <div id="result-text">找到 0 个质数，用时 0 秒！</div>
+        <button id="again-btn">🔄 再来一次</button>
+    </div>
+
+    <script>
+        let worker;
+        let startTime;
+        let lastCount = 0;
+        let timerInterval;
+        let isRunning = false;
+        let heartbeatMissed = 0;
+
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const protectionAlert = document.getElementById('protection-alert');
+        const shareSection = document.getElementById('share-section');
+
+        startBtn.addEventListener('click', startChallenge);
+        stopBtn.addEventListener('click', stopChallenge);
+        document.getElementById('again-btn').addEventListener('click', () => {
+            shareSection.style.display = 'none';
+            startChallenge();
+        });
+
+        function startChallenge() {
+            if (isRunning) return;
+
+            // 重置界面
+            protectionAlert.style.display = 'none';
+            shareSection.style.display = 'none';
+            document.getElementById('prime-count').innerText = '0';
+            document.getElementById('current-num').innerText = '2';
+            document.getElementById('speed').innerText = '-- primes/sec';
+            document.getElementById('timer').innerText = '0s';
+
+            isRunning = true;
+            startTime = Date.now();
+            lastCount = 0;
+            heartbeatMissed = 0;
+
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+
+            // 创建 Web Worker
+            const blob = new Blob([`
+                let count = 0;
+                let n = 2;
+
+                function isPrime(num) {
+                    if (num < 2) return false;
+                    if (num === 2) return true;
+                    if (num % 2 === 0) return false;
+                    for (let i = 3; i <= Math.sqrt(num); i += 2) {
+                        if (num % i === 0) return false;
+                    }
+                    return true;
+                }
+
+                setInterval(() => {
+                    let found = 0;
+                    const start = Date.now();
+                    while (Date.now() - start < 40) { // 控制每轮计算时间，避免卡死
+                        if (isPrime(n)) found++;
+                        n++;
+                    }
+                    count += found;
+                    postMessage({ count, current: n, found });
+                }, 50);
+            `], { type: 'application/javascript' });
+
+            worker = new Worker(URL.createObjectURL(blob));
+
+            worker.onmessage = function(e) {
+                const { count, current, found } = e.data;
+                const now = Date.now();
+                const elapsed = (now - startTime) / 1000;
+                const speed = Math.round(found / 0.05);
+
+                document.getElementById('prime-count').innerText = count.toLocaleString();
+                document.getElementById('current-num').innerText = current.toLocaleString();
+                document.getElementById('speed').innerText = speed.toLocaleString() + ' primes/sec';
+                document.getElementById('timer').innerText = Math.floor(elapsed) + 's';
+
+                // 心跳检测：如果主线程太久没响应，说明卡了
+                heartbeatMissed = 0;
+                setTimeout(() => {
+                    heartbeatMissed++;
+                    if (heartbeatMissed > 2 && isRunning) {
+                        autoProtect();
+                    }
+                }, 1000);
+            };
+
+            worker.onerror = function(e) {
+                console.error("Worker error:", e);
+                autoProtect();
+            };
+
+            // 启动计时器
+            timerInterval = setInterval(() => {
+                if (!isRunning) return;
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                document.getElementById('timer').innerText = elapsed + 's';
+            }, 1000);
+
+            // 启动过热保护检测
+            setTimeout(checkPerformance, 5000);
+        }
+
+        function checkPerformance() {
+            if (!isRunning) return;
+            const speedText = document.getElementById('speed').innerText;
+            const currentSpeed = parseInt(speedText) || 0;
+            if (currentSpeed < lastCount * 0.4 && lastCount > 500) {
+                autoProtect();
+                return;
+            }
+            lastCount = currentSpeed;
+            setTimeout(checkPerformance, 5000);
+        }
+
+        function autoProtect() {
+            stopChallenge();
+            protectionAlert.style.display = 'block';
+        }
+
+        function stopChallenge() {
+            if (worker) {
+                worker.terminate();
+                worker = null;
+            }
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            isRunning = false;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+
+            // 显示结果
+            const count = parseInt(document.getElementById('prime-count').innerText.replace(/,/g, ''));
+            const time = parseInt(document.getElementById('timer').innerText);
+            document.getElementById('result-text').innerText = `找到 ${count.toLocaleString()} 个质数，用时 ${time} 秒！`;
+            shareSection.style.display = 'block';
+        }
+
+        // 页面隐藏时自动降低负载（节能+安全）
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && isRunning) {
+                // 可选：暂停或降低强度
+                console.log("页面切到后台，降低负载中...");
+            }
+        });
+    </script>
+</body>
+</html>
